@@ -14,6 +14,9 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QP
 from PyQt5.QtCore import QDateTime, Qt, QTime, QRect, QDate, QSettings
 from PyQt5.QtGui import QPainter, QColor, QFont, QPen
 
+# Подключаем наш модуль для работы с базой данных
+import database
+
 # ========================== QSS (ТЕМНАЯ ТЕМА) ==========================
 DARK_THEME_QSS = """
 /* Общие настройки */
@@ -77,56 +80,7 @@ QSplitter::handle { background-color: #3e3e42; }
 """
 
 
-# ========================== ЛИЦЕНЗИРОВАНИЕ (АНТИ-ПИРАТСТВО) ==========================
-class LicenseDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Активация продукта Loom")
-        self.setFixedSize(450, 160)
-        layout = QVBoxLayout(self)
-
-        self.info_label = QLabel(
-            "Программа не активирована.\n"
-            "Пожалуйста, введите лицензионный ключ для продолжения:\n"
-            "(Для тестирования введи ключ: XXXX-XXXX-XXXX)"
-        )
-        self.key_input = QLineEdit()
-        self.key_input.setPlaceholderText("XXXX-XXXX-XXXX")
-
-        self.btn = QPushButton("Активировать программу")
-        self.btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        self.btn.clicked.connect(self.check_key)
-
-        layout.addWidget(self.info_label)
-        layout.addWidget(self.key_input)
-        layout.addStretch()
-        layout.addWidget(self.btn)
-
-    def check_key(self):
-        key = self.key_input.text().strip()
-        if key == "MAXX-2026-WORK":
-            self.accept()
-        else:
-            QMessageBox.critical(self, "Ошибка активации", "Неверный или истекший лицензионный ключ!")
-
-
-def verify_license():
-    settings = QSettings("MyCompany", "PlannerPro")
-    is_activated = settings.value("is_activated", False, type=bool)
-
-    if not is_activated:
-        dlg = LicenseDialog()
-        dlg.setStyleSheet(DARK_THEME_QSS)
-        if dlg.exec_() == QDialog.Accepted:
-            settings.setValue("is_activated", True)
-            return True
-        else:
-            return False
-    return True
-
-
 # -------------------------- Модели ---------------------------------
-
 class TimeSlot:
     def __init__(self, start: QDateTime, end: QDateTime):
         self.start = start
@@ -173,6 +127,7 @@ class Order:
         self.product = product
         self.penalty_per_hour = penalty_per_hour
         self.operations = product.processes.copy() if product else []
+        self.weight = 1
 
 
 class ScheduleItem:
@@ -189,7 +144,6 @@ class ScheduleItem:
 
 
 # -------------------------- Рабочий день ---------------------------------
-
 WORK_START_HOUR = 8
 WORK_END_HOUR = 16
 
@@ -209,11 +163,9 @@ def get_workday_end(dt: QDateTime) -> QDateTime:
 def calculate_estimated_end(start_dt: QDateTime, duration_hours: int) -> QDateTime:
     current = normalize_to_workday(start_dt)
     remaining_hours = float(duration_hours)
-
     while remaining_hours > 0:
         work_end = get_workday_end(current)
         hours_today = current.secsTo(work_end) / 3600.0
-
         if remaining_hours <= hours_today:
             current = current.addSecs(int(remaining_hours * 3600))
             remaining_hours = 0
@@ -224,7 +176,6 @@ def calculate_estimated_end(start_dt: QDateTime, duration_hours: int) -> QDateTi
 
 
 # -------------------------- Планировщик ------------------------------
-
 def insert_busy_slot(res: Resource, slot: TimeSlot):
     i = 0
     while i < len(res.busy) and res.busy[i].start < slot.start:
@@ -240,21 +191,17 @@ def find_free_slot(res: Resource, from_dt: QDateTime, duration_hours: int) -> Op
     for _ in range(max_iter):
         work_end = get_workday_end(current)
         end_candidate = current.addSecs(duration_hours * 3600)
-
         if end_candidate > work_end:
             current = QDateTime(current.date().addDays(1), QTime(WORK_START_HOUR, 0))
             continue
-
         conflict = False
         for slot in res.busy:
             if not (end_candidate <= slot.start or current >= slot.end):
                 current = normalize_to_workday(slot.end)
                 conflict = True
                 break
-
         if conflict:
             continue
-
         return current
     return None
 
@@ -270,10 +217,9 @@ class Scheduler:
         for wr in working_res:
             wr.busy = []
 
-        sorted_orders = sorted(self.orders, key=lambda o: (-o.priority, o.deadline))
         total_penalty = 0.0
 
-        for order in sorted_orders:
+        for order in self.orders:
             ops = order.operations
             current = normalize_to_workday(order.start)
             order_failed = False
@@ -305,14 +251,11 @@ class Scheduler:
                         continue
 
                     emp_free = find_free_slot(emp, current, op.duration)
-
                     if emp_free is None:
                         continue
 
                     if not req_mach:
                         start = emp_free
-                        end = start.addSecs(op.duration * 3600)
-
                         score = emp.priority * 1000 - start.toSecsSinceEpoch()
                         if score > best_score:
                             best_score = score
@@ -344,8 +287,6 @@ class Scheduler:
                                 continue
 
                             start = joint_start
-                            end = start.addSecs(op.duration * 3600)
-
                             score = emp.priority * 1000 + mach.priority * 500 - start.toSecsSinceEpoch()
                             if score > best_score:
                                 best_score = score
@@ -377,11 +318,9 @@ class Scheduler:
                 result.append(ScheduleItem(order.id, op.id, emp_name, mach_name, start, end, True))
 
                 current = end
-                # ФИКС: Используем строгий if вместо встроенного max() для надежности расчета дедлайна
                 if end > order_end:
                     order_end = end
 
-            # РАСЧЕТ ШТРАФА ПО ФОРМУЛЕ
             if not order_failed and ops and order_end > order.deadline:
                 overdue_hours = order.deadline.secsTo(order_end) / 3600.0
                 if overdue_hours > 0:
@@ -392,7 +331,6 @@ class Scheduler:
 
 
 # -------------------------- Диалог выбора продукта --------------------
-
 class SelectProductDialog(QDialog):
     def __init__(self, products: List[Product], parent=None):
         super().__init__(parent)
@@ -413,7 +351,6 @@ class SelectProductDialog(QDialog):
 
 
 # -------------------------- Виджет Ганта ---------------------------------
-
 class GanttWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -549,7 +486,6 @@ class GanttWidget(QWidget):
 
 
 # -------------------------- Главное окно ---------------------------------
-
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -568,102 +504,53 @@ class MainWindow(QWidget):
         self.mach_types = ["фрезерный станок", "токарный станок", "сверлильный станок", "ЧПУ"]
 
         self.initUI()
-        self.updateAllLists()
-        self.auto_load()
 
-    def get_config_path(self):
-        return os.path.join(os.path.dirname(sys.argv[0]), "autosave_config.json")
+        # 1. Запуск инициализации и загрузки данных из PostgreSQL
+        database.init_from_csv()
+        self.load_from_db()
 
-    def _create_save_data(self):
-        return {
-            "emp_types": self.emp_types,
-            "mach_types": self.mach_types,
-            "resources": [{"id": r.id, "name": r.name, "type": r.type, "category": r.category, "priority": r.priority}
-                          for r in self.resources],
-            "process_templates": [
-                {"id": p.id, "name": p.name, "duration": p.duration, "emp_type": p.emp_type, "mach_type": p.mach_type}
-                for p in self.process_templates],
-            "products": [{"id": prod.id, "name": prod.name, "process_ids": [p.id for p in prod.processes]} for prod in
-                         self.products],
-            "orders": [{"id": o.id, "name": o.name, "priority": o.priority, "start": o.start.toString(Qt.ISODate),
-                        "deadline": o.deadline.toString(Qt.ISODate), "product_id": o.product.id,
-                        "penalty_per_hour": o.penalty_per_hour} for o in self.orders]
-        }
+    def load_from_db(self):
+        """Загрузка ресурсов, техпроцессов и заказов напрямую из PostgreSQL."""
+        # Ресурсы
+        db_res = database.get_resources()
+        self.resources = [
+            Resource(r["id"], r["name"], r["type"], r["category"], r["priority"])
+            for r in db_res
+        ]
 
-    def auto_save(self):
-        try:
-            with open(self.get_config_path(), "w", encoding="utf-8") as f:
-                json.dump(self._create_save_data(), f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"Ошибка автосохранения: {e}")
+        # Изделия и операции
+        db_prods = database.get_products()
+        db_ops = database.get_operations()
 
-    def saveToJson(self):
-        filename, _ = QFileDialog.getSaveFileName(self, "Сохранить конфигурацию", "", "JSON (*.json)")
-        if not filename:
-            return
-        try:
-            with open(filename, "w", encoding="utf-8") as f:
-                json.dump(self._create_save_data(), f, indent=2, ensure_ascii=False)
-            QMessageBox.information(self, "Сохранение", "Конфигурация успешно сохранена!")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить файл:\n{e}")
-
-    def _load_data_dict(self, data):
-        if "emp_types" in data:
-            self.emp_types = data["emp_types"]
-        if "mach_types" in data:
-            self.mach_types = data["mach_types"]
-
-        self.resources = [Resource(r["id"], r["name"], r["type"], r["category"], r["priority"]) for r in
-                          data.get("resources", [])]
-
-        self.process_templates = []
-        proc_map = {}
-        for p in data.get("process_templates", []):
-            proc = Process(p["id"], p["name"], p["duration"], p["emp_type"], p.get("mach_type", ""))
-            self.process_templates.append(proc)
-            proc_map[proc.id] = proc
+        ops_by_prod = {}
+        for op in db_ops:
+            p_id = op["product_id"]
+            if p_id not in ops_by_prod:
+                ops_by_prod[p_id] = []
+            ops_by_prod[p_id].append(
+                Process(op["id"], op["name"], op["duration"], op["required_emp_type"],
+                        op.get("required_mach_type") or "")
+            )
 
         self.products = []
-        for p in data.get("products", []):
+        for p in db_prods:
             prod = Product(p["id"], p["name"])
-            prod.processes = [proc_map[pid] for pid in p.get("process_ids", []) if pid in proc_map]
+            prod.processes = ops_by_prod.get(p["id"], [])
             self.products.append(prod)
 
+        # Заказы
+        db_orders = database.get_orders()
         self.orders = []
-        for o in data.get("orders", []):
-            s = QDateTime.fromString(o["start"], Qt.ISODate)
-            d = QDateTime.fromString(o["deadline"], Qt.ISODate)
+        for o in db_orders:
             prod = next((p for p in self.products if p.id == o["product_id"]), None)
-            if prod:
-                self.orders.append(Order(o["id"], o["name"], o["priority"], s, d, prod, o.get("penalty_per_hour", 0.0)))
+            s_dt = QDateTime.fromSecsSinceEpoch(int(o["start_time"].timestamp()))
+            d_dt = QDateTime.fromSecsSinceEpoch(int(o["deadline"].timestamp()))
+            ord_obj = Order(o["id"], o["order_number"], o["priority"], s_dt, d_dt, prod,
+                            float(o.get("penalty_per_hour", 0.0)))
+            ord_obj.weight = int(o.get("weight", 1))
+            self.orders.append(ord_obj)
 
         self.updateAllLists()
-        self.updateTypeCombo(self.res_category_combo.currentText())
-
-    def auto_load(self):
-        path = self.get_config_path()
-        if not os.path.exists(path): return
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                self._load_data_dict(json.load(f))
-        except Exception as e:
-            print(f"Ошибка автозагрузки: {e}")
-
-    def loadFromJson(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Загрузить конфигурацию", "", "JSON (*.json)")
-        if not filename:
-            return
-        try:
-            with open(filename, "r", encoding="utf-8") as f:
-                self._load_data_dict(json.load(f))
-            QMessageBox.information(self, "Загрузка", "Конфигурация успешно загружена!")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка загрузки", f"Не удалось загрузить файл:\n{e}")
-
-    def closeEvent(self, event):
-        self.auto_save()
-        event.accept()
 
     def _get_free_id(self, items):
         used = {item.id for item in items}
@@ -921,13 +808,18 @@ class MainWindow(QWidget):
         plan_tab = QWidget()
         plan_layout = QVBoxLayout(plan_tab)
         btn_layout = QHBoxLayout()
+
+        # Выпадающий список правил приоритета
+        self.rule_combo = QComboBox()
+        self.rule_combo.addItems(["FIFO", "EDD", "SPT", "LPT", "WSPT"])
+        self.rule_combo.setToolTip("Выберите правило приоритета для формирования расписания")
+
         run_btn = QPushButton("Построить расписание")
         run_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        save_btn = QPushButton("Сохранить конфигурацию")
-        load_btn = QPushButton("Загрузить конфигурацию")
+
+        btn_layout.addWidget(QLabel("Правило приоритета:"))
+        btn_layout.addWidget(self.rule_combo)
         btn_layout.addWidget(run_btn)
-        btn_layout.addWidget(save_btn)
-        btn_layout.addWidget(load_btn)
         plan_layout.addLayout(btn_layout)
 
         self.progress = QProgressBar()
@@ -976,8 +868,6 @@ class MainWindow(QWidget):
         tabs.addTab(plan_tab, "Расписание")
 
         run_btn.clicked.connect(self.runScheduling)
-        save_btn.clicked.connect(self.saveToJson)
-        load_btn.clicked.connect(self.loadFromJson)
 
     # -------------------- Управление пресетами --------------------
     def addResourceType(self):
@@ -1150,7 +1040,6 @@ class MainWindow(QWidget):
         self.total_time_label.setText(f"Общее время: {prod.total_duration()} ч")
 
     def _refresh_product_list_item(self, prod: Product):
-        """Вспомогательная функция для обновления текста изделия в списке без перезагрузки"""
         for i in range(self.product_list.count()):
             item = self.product_list.item(i)
             if item.data(Qt.UserRole) == prod.id:
@@ -1405,20 +1294,57 @@ class MainWindow(QWidget):
     # -------------------- Планирование --------------------
     def runScheduling(self):
         if not self.resources or not self.orders:
-            QMessageBox.warning(self, "Ошибка", "Добавьте хотя бы один ресурс и один заказ")
+            QMessageBox.warning(self, "Ошибка", "Нет ресурсов или заказов для планирования")
             return
+
+        selected_rule = self.rule_combo.currentText()
+
+        # Применяем выбранное правило приоритета
+        if selected_rule == "FIFO":
+            self.orders.sort(key=lambda o: o.id)
+        elif selected_rule == "EDD":
+            self.orders.sort(key=lambda o: o.deadline)
+        elif selected_rule == "SPT":
+            self.orders.sort(key=lambda o: sum(p.duration for p in o.operations))
+        elif selected_rule == "LPT":
+            self.orders.sort(key=lambda o: -sum(p.duration for p in o.operations))
+        elif selected_rule == "WSPT":
+            self.orders.sort(key=lambda o: -(getattr(o, "weight", 1) / max(1, sum(p.duration for p in o.operations))))
 
         self.progress.setRange(0, 0)
         QApplication.processEvents()
 
+        # Расчет расписания
         sched = Scheduler(self.resources, self.orders)
         self.schedule_result, self.current_penalty = sched.schedule()
+
+        # Транзакционное сохранение результата в PostgreSQL через database.py
+        db_items = []
+        emp_map = {r.name: r.id for r in self.resources}
+        for item in self.schedule_result:
+            if item.success:
+                db_items.append({
+                    "order_id": item.orderId,
+                    "operation_id": item.processId,
+                    "employee_id": emp_map.get(item.employee, self.resources[0].id),
+                    "machine_id": emp_map.get(item.machine) if item.machine and item.machine != "нет" else None,
+                    "start_time": item.start.toPyDateTime(),
+                    "end_time": item.end.toPyDateTime(),
+                    "is_success": item.success,
+                    "fail_reason": None
+                })
+
+        database.save_schedule(db_items)
+        database.export_schedule_to_csv("schedule.csv")
 
         self.progress.setRange(0, 100)
         self.progress.setValue(100)
 
-        self.penalty_label.setText(f"Общий штраф за просрочку: {self.current_penalty:.2f} руб.")
+        self.penalty_label.setText(
+            f"Общий штраф за просрочку: {self.current_penalty:.2f} руб. (Правило: {selected_rule})")
         self.populateScheduleTree()
+        QMessageBox.information(self, "Успех",
+                                f"Расписание успешно построено по правилу {selected_rule} и сохранено в БД!")
 
     def populateScheduleTree(self):
         self.schedule_tree.blockSignals(True)
@@ -1489,12 +1415,8 @@ class MainWindow(QWidget):
 # -------------------------- Запуск ---------------------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
     app.setStyleSheet(DARK_THEME_QSS)
 
-    if verify_license():
-        window = MainWindow()
-        window.show()
-        sys.exit(app.exec_())
-    else:
-        sys.exit(0)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
