@@ -208,15 +208,8 @@ def run_schedule_endpoint(req: ScheduleRunRequest):
         )
 
     sorted_orders = benchmark.sort_orders(orders, rule)
-    res_tuple = benchmark.run_schedule(resources, sorted_orders)
-    records = res_tuple[0]
-    stats = res_tuple[1]
-
-    # Извлекаем штраф: если вернулся словарь, достаём значение по ключу
-    if isinstance(stats, dict):
-        total_penalty = float(stats.get("total_penalty", stats.get("penalty", 0.0)))
-    else:
-        total_penalty = float(stats)
+    records, end_times = benchmark.run_schedule(resources, sorted_orders)
+    metrics = benchmark.evaluate_schedule(sorted_orders, end_times)
 
     # Сохраняем в PostgreSQL и в CSV
     database.save_schedule(records)
@@ -226,8 +219,8 @@ def run_schedule_endpoint(req: ScheduleRunRequest):
         "status": "success",
         "rule_applied": rule,
         "operations_count": len(records),
-        "total_penalty": round(total_penalty, 2),
-        "stats": stats if isinstance(stats, dict) else {}
+        "total_penalty": metrics["penalty"],
+        "metrics": metrics
     }
 
 
