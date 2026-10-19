@@ -102,7 +102,7 @@ if __name__ == "__main__":
     # 1. Расчёт по простому правилу WSPT (базовая линия)
     wspt_orders = benchmark.sort_orders(orders.copy(), "WSPT")
     _, wspt_pen = benchmark.run_schedule(resources, wspt_orders)
-    print(f"\nБазовый штраф по правилу WSPT: {wspt_pen:.2f} руб.")
+    print(f"\nБазовый штраф по правилу WSPT: {wspt_pen}")
     
     # 2. Оптимизация отжигом (лимит 3 секунды)
     print("\nЗапуск Simulated Annealing (лимит 3.0 сек)...")
