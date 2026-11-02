@@ -3,6 +3,7 @@ import csv
 import time
 import random
 from datetime import datetime, timedelta
+from typing import List, Dict, Any, Tuple
 import database
 
 # Фиксируем seed для строгой повторяемости данных по заданию
@@ -25,7 +26,7 @@ class ResourceObj:
         self.category = category
         self.type = type_
         self.priority = priority
-        self.busy: list[TimeSlot] = []
+        self.busy: List[TimeSlot] = []
 
 class OperationObj:
     def __init__(self, id: int, product_id: int, step_number: int, name: str,
@@ -51,7 +52,7 @@ class OrderObj:
         self.deadline = deadline
         self.penalty_per_hour = penalty_per_hour
         self.weight = weight
-        self.operations: list[OperationObj] = []
+        self.operations: List[OperationObj] = []
 
     def total_duration(self) -> int:
         return sum(op.duration for op in self.operations)
@@ -69,7 +70,7 @@ def normalize_to_workday(dt: datetime) -> datetime:
 def get_workday_end(dt: datetime) -> datetime:
     return dt.replace(hour=WORK_END_HOUR, minute=0, second=0, microsecond=0)
 
-def find_free_slot(res: ResourceObj, from_dt: datetime, duration_hours: int):
+def find_free_slot(res: ResourceObj, from_dt: datetime, duration_hours: int) -> datetime:
     current = normalize_to_workday(from_dt)
     for _ in range(5000):
         w_end = get_workday_end(current)
@@ -100,20 +101,20 @@ def insert_busy_slot(res: ResourceObj, slot: TimeSlot):
 
 # ==================== ПРАВИЛА ПРИОРИТЕТА ====================
 
-def sort_orders(orders: list[OrderObj], rule: str) -> list[OrderObj]:
+def sort_orders(orders: List[OrderObj], rule: str) -> List[OrderObj]:
     rule = rule.upper()
     if rule == "FIFO":
-        # По порядку поступления (по ID / номеру)
+        # First In, First Out: в порядке поступления (по номеру / ID)
         return sorted(orders, key=lambda o: o.id)
     elif rule == "EDD":
         # Earliest Due Date: сначала самые срочные по дедлайну
-        return sorted(orders, key=lambda o: o.deadline)
+        return sorted(orders, key=lambda o: (o.deadline, -o.priority))
     elif rule == "SPT":
         # Shortest Processing Time: сначала короткие заказы
-        return sorted(orders, key=lambda o: o.total_duration())
+        return sorted(orders, key=lambda o: (o.total_duration(), o.deadline))
     elif rule == "LPT":
-        # Longest Processing Time: сначала самые длительные заказы
-        return sorted(orders, key=lambda o: -o.total_duration())
+        # Longest Processing Time: сначала длительные заказы
+        return sorted(orders, key=lambda o: (-o.total_duration(), o.deadline))
     elif rule == "WSPT":
         # Weighted Shortest Processing Time: по убыванию (вес / длительность)
         return sorted(orders, key=lambda o: -(o.weight / max(1, o.total_duration())))
@@ -122,7 +123,7 @@ def sort_orders(orders: list[OrderObj], rule: str) -> list[OrderObj]:
 
 # ==================== ДВИЖОК ПЛАНИРОВАНИЯ ====================
 
-def run_schedule(resources: list[ResourceObj], orders: list[OrderObj]):
+def run_schedule(resources: List[ResourceObj], orders: List[OrderObj]) -> Tuple[List[Dict[str, Any]], Dict[int, datetime]]:
     working_res = [ResourceObj(r.id, r.name, r.category, r.type, r.priority) for r in resources]
     schedule_records = []
     order_end_times = {}
@@ -173,10 +174,11 @@ def run_schedule(resources: list[ResourceObj], orders: list[OrderObj]):
 
                         cur_joint = current
                         joint_start = None
-                        for _ in range(50):
+                        for _ in range(100):
                             ef = find_free_slot(emp, cur_joint, op.duration)
                             mf = find_free_slot(mach, cur_joint, op.duration)
-                            if not ef or not mf: break
+                            if not ef or not mf:
+                                break
                             if ef == mf:
                                 joint_start = ef
                                 break
@@ -226,7 +228,14 @@ def run_schedule(resources: list[ResourceObj], orders: list[OrderObj]):
 
 # ==================== МЕТРИКИ ОЦЕНКИ ====================
 
-def evaluate_schedule(orders: list[OrderObj], order_end_times: dict):
+def evaluate_schedule(orders: List[OrderObj], order_end_times: Dict[int, datetime]) -> Dict[str, Any]:
+    """
+    Расчет ключевых производственных метрик:
+    - суммарный взвешенный штраф (часы просрочки * штраф/час * вес)
+    - количество сорванных заказов
+    - максимальное опоздание (в часах)
+    - дата/время завершения последней операции (Makespan)
+    """
     total_weighted_penalty = 0.0
     overdue_count = 0
     max_lateness_hours = 0.0
@@ -241,7 +250,7 @@ def evaluate_schedule(orders: list[OrderObj], order_end_times: dict):
             lateness = (end_t - order.deadline).total_seconds() / 3600.0
             if lateness > 0:
                 overdue_count += 1
-                total_weighted_penalty += lateness * order.weight
+                total_weighted_penalty += lateness * order.penalty_per_hour * order.weight
                 if lateness > max_lateness_hours:
                     max_lateness_hours = lateness
 
@@ -255,14 +264,22 @@ def evaluate_schedule(orders: list[OrderObj], order_end_times: dict):
 # ==================== ГЕНЕРАТОР НАБОРОВ ====================
 
 def generate_datasets():
-    sizes = {"small": 5, "medium": 15, "large": 30}
+    """
+    Генерирует 3 набора данных:
+    - Малый: 10 заказов
+    - Средний: 25 заказов
+    - Большой: 50 заказов
+    С плотным потоком и реалистичными дедлайнами, чтобы создать реальную конкуренцию за ресурсы.
+    """
+    random.seed(42)
+    sizes = {"small": 10, "medium": 25, "large": 50}
     base_start = datetime(2026, 10, 1, 8, 0)
 
     for set_name, count in sizes.items():
         folder = os.path.join("data", set_name)
         os.makedirs(folder, exist_ok=True)
 
-        # Копируем неизменные справочники
+        # Копируем базовые справочники (продукты, ресурсы, операции)
         for f_name in ["resources.csv", "products.csv", "operations.csv"]:
             src = os.path.join("data", f_name)
             dst = os.path.join(folder, f_name)
@@ -270,7 +287,6 @@ def generate_datasets():
                 with open(src, "r", encoding="utf-8") as fin, open(dst, "w", encoding="utf-8") as fout:
                     fout.write(fin.read())
 
-        # Генерируем заказы с random.seed(42)
         orders_file = os.path.join(folder, "orders.csv")
         with open(orders_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -278,13 +294,18 @@ def generate_datasets():
                              "start_time", "deadline", "penalty_per_hour", "weight", "status"])
             for i in range(1, count + 1):
                 p_id = random.choice([1, 2, 3])
-                day_offset = (i - 1) // 3
+                # Плотное поступление: 3-4 заказа поступают каждое утро
+                day_offset = (i - 1) // 4
                 start_dt = base_start + timedelta(days=day_offset)
-                # Дедлайн от 1 до 3 рабочих дней
-                deadline_dt = start_dt + timedelta(days=random.randint(1, 3), hours=random.choice([0, 4, 8]))
+                
+                # Реалистичный жесткий дедлайн: от 1 до 3 рабочих дней
+                deadline_days = random.choice([1, 2, 2, 3])
+                deadline_hour = random.choice([12, 16])
+                deadline_dt = (start_dt + timedelta(days=deadline_days)).replace(hour=deadline_hour, minute=0)
+
                 prio = random.randint(1, 10)
                 weight = random.randint(1, 5)
-                penalty = float(random.choice([300, 500, 800, 1000]))
+                penalty = float(random.choice([200, 350, 500, 750, 1000]))
 
                 writer.writerow([
                     i, f"ЗАК-2026-{i:03d}", p_id, prio, 1,
@@ -292,13 +313,13 @@ def generate_datasets():
                     deadline_dt.strftime("%Y-%m-%d %H:%M"),
                     f"{penalty:.2f}", weight, "Новый"
                 ])
-    print("[INFO] Наборы данных (small: 5, medium: 15, large: 30) успешно сгенерированы в папке data/.")
+    print("[INFO] Наборы данных (small: 10, medium: 25, large: 50) сгенерированы в data/.")
 
-# ==================== ОСНОВНОЙ ПРОГОН (15 ТЕСТОВ) ====================
+
+# ==================== ЗАГРУЗКА ИЗ БД ====================
 
 def load_objects_from_db():
     raw_res = database.get_resources()
-    raw_prods = database.get_products()
     raw_ops = database.get_operations()
     raw_ords = database.get_orders()
 
@@ -326,22 +347,25 @@ def load_objects_from_db():
 
     return resources, orders
 
+
+# ==================== ОСНОВНОЙ БЕНЧМАРК (15 ТЕСТОВ) ====================
+
 def run_benchmark():
     generate_datasets()
     rules = ["FIFO", "EDD", "SPT", "LPT", "WSPT"]
-    datasets = [("Малый (5)", "small"), ("Средний (15)", "medium"), ("Большой (30)", "large")]
+    datasets = [("Малый (10)", "small"), ("Средний (25)", "medium"), ("Большой (50)", "large")]
     results_table = []
 
-    last_schedule_to_save = None
-
-    print("\n" + "=" * 110)
-    print("ЗАПУСК СРАВНИТЕЛЬНОГО АНАЛИЗА 5 ПРАВИЛ ПРИОРИТЕТА НА 3 НАБОРАХ ДАННЫХ")
-    print("=" * 110)
+    print("\n" + "=" * 115)
+    print("      ЗАПУСК СРАВНИТЕЛЬНОГО АНАЛИЗА 5 ПРАВИЛ ПРИОРИТЕТА НА 3 НАБОРАХ ДАННЫХ (15 ПРОГОНОВ)")
+    print("=" * 115)
 
     for set_title, set_dir in datasets:
-        # Перезагружаем БД текущим датасетом через database.py
-        database.init_from_csv(data_dir=os.path.join("data", set_dir))
+        dataset_path = os.path.join("data", set_dir)
+        # Принудительно перезагружаем базу данных текущим набором (force_reload=True)
+        database.init_from_csv(data_dir=dataset_path, force_reload=True)
         resources, orders = load_objects_from_db()
+        print(f"\n[DATASET] Загружен набор '{set_title}': заказов={len(orders)}, ресурсов={len(resources)}")
 
         for rule in rules:
             t_start = time.perf_counter()
@@ -350,31 +374,77 @@ def run_benchmark():
             t_elapsed_ms = (time.perf_counter() - t_start) * 1000.0
 
             metrics = evaluate_schedule(ordered, end_times)
-            last_schedule_to_save = sched_records
 
             results_table.append({
                 "rule": rule,
                 "dataset": set_title,
-                "penalty": metrics["penalty"],
+                "penalty": f"{metrics['penalty']:,.2f}",
                 "overdue_count": metrics["overdue_count"],
-                "max_lateness": metrics["max_lateness"],
+                "max_lateness": f"{metrics['max_lateness']:.1f}",
                 "makespan": metrics["makespan"],
                 "time_ms": f"{t_elapsed_ms:.2f}"
             })
 
     # Печать итоговой сводной таблицы из 15 строк
-    print("\n" + "-" * 110)
-    print(f"{'Правило':<8} | {'Набор данных':<14} | {'Взвеш. штраф':<14} | {'Просрочено':<11} | {'Макс. просрочка (ч)':<20} | {'Окончание':<12} | {'Время (мс)'}")
-    print("-" * 110)
+    print("\n" + "=" * 115)
+    print("                 ИТОГОВАЯ СВОДНАЯ ТАБЛИЦА СРАВНИТЕЛЬНОГО АНАЛИЗА ПРАВИЛ ПРИОРИТЕТА")
+    print("=" * 115)
+    print(f"{'Правило':<8} | {'Набор данных':<14} | {'Взвеш. штраф (руб)':<20} | {'Просрочено':<11} | {'Макс. просрочка (ч)':<20} | {'Окончание':<12} | {'Время (мс)'}")
+    print("-" * 115)
     for r in results_table:
-        print(f"{r['rule']:<8} | {r['dataset']:<14} | {r['penalty']:<14} | {r['overdue_count']:<11} | {r['max_lateness']:<20} | {r['makespan']:<12} | {r['time_ms']}")
-    print("-" * 110)
+        print(f"{r['rule']:<8} | {r['dataset']:<14} | {r['penalty']:<20} | {r['overdue_count']:<11} | {r['max_lateness']:<20} | {r['makespan']:<12} | {r['time_ms']}")
+    print("-" * 115)
 
-    if last_schedule_to_save:
-        database.save_schedule(last_schedule_to_save)
-        database.export_schedule_to_csv("schedule.csv")
-        print("\n[INFO] Вывод последнего сохраненного расписания из базы данных:")
-        database.print_schedule_table()
+    # Возвращаем базу данных в исходное состояние (демо-данные из data/)
+    print("\n[INFO] Возврат базы данных к базовым справочникам data/...")
+    database.init_from_csv(data_dir="data", force_reload=True)
+
+
+# ==================== ПРОВЕРКА FIFO vs EDD ДЛЯ ОТЧЕТА ====================
+
+def run_fifo_vs_edd_check():
+    """
+    Демонстрационный прогон для отчета:
+    1. Запускает планирование по FIFO -> сохраняет в БД -> показывает состояние schedule.
+    2. Запускает планирование по EDD  -> сохраняет в БД -> показывает, что расписание перезаписалось.
+    """
+    print("\n" + "=" * 80)
+    print("         ДЕМОНСТРАЦИОННЫЙ ПРОГОН: ПРОВЕРКА ПЕРЕЗАПИСИ РАСПИСАНИЯ (FIFO vs EDD)")
+    print("=" * 80)
+
+    # Загружаем базовые данные
+    database.init_from_csv(data_dir="data", force_reload=True)
+    resources, orders = load_objects_from_db()
+
+    # 1. Прогон по FIFO
+    print("\n>>> [1] Расчет расписания по правилу FIFO...")
+    fifo_orders = sort_orders(orders, "FIFO")
+    fifo_records, _ = run_schedule(resources, fifo_orders)
+    database.save_schedule(fifo_records)
+    database.export_schedule_to_csv("schedule_fifo.csv")
+    fifo_saved = database.get_last_schedule()
+    print(f"[OK] В таблицу schedule записано строк по FIFO: {len(fifo_saved)}")
+    print("Первые 3 операции в БД (FIFO):")
+    for r in fifo_saved[:3]:
+        print(f"  Заказ {r['order_number']}, Шаг {r['step_number']}: {r['operation_name']} [{r['start_time'].strftime('%d.%m %H:%M')} - {r['end_time'].strftime('%d.%m %H:%M')}]")
+
+    # 2. Прогон по EDD
+    print("\n>>> [2] Расчет расписания по правилу EDD...")
+    edd_orders = sort_orders(orders, "EDD")
+    edd_records, _ = run_schedule(resources, edd_orders)
+    database.save_schedule(edd_records)
+    database.export_schedule_to_csv("schedule_edd.csv")
+    edd_saved = database.get_last_schedule()
+    print(f"[OK] В таблицу schedule записано строк по EDD: {len(edd_saved)}")
+    print("Первые 3 операции в БД (EDD):")
+    for r in edd_saved[:3]:
+        print(f"  Заказ {r['order_number']}, Шаг {r['step_number']}: {r['operation_name']} [{r['start_time'].strftime('%d.%m %H:%M')} - {r['end_time'].strftime('%d.%m %H:%M')}]")
+
+    # Сохраняем итоговое расписание в основной schedule.csv
+    database.export_schedule_to_csv("schedule.csv")
+    print("\n[OK] Проверка завершена успешно! Таблица атомарно очищается и перезаписывается.")
+
 
 if __name__ == "__main__":
     run_benchmark()
+    run_fifo_vs_edd_check()

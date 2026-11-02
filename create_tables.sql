@@ -1,4 +1,4 @@
-CREATE TABLE resources (
+CREATE TABLE IF NOT EXISTS resources (
     id SERIAL PRIMARY KEY,
     name VARCHAR(150) NOT NULL,
     category VARCHAR(20) NOT NULL,
@@ -9,13 +9,13 @@ CREATE TABLE resources (
     CONSTRAINT chk_resource_priority CHECK (priority BETWEEN 1 AND 100)
 );
 
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     name VARCHAR(150) NOT NULL UNIQUE,
     description TEXT
 );
 
-CREATE TABLE operations (
+CREATE TABLE IF NOT EXISTS operations (
     id SERIAL PRIMARY KEY,
     product_id INT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     step_number INT NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE operations (
     CONSTRAINT uq_product_step UNIQUE (product_id, step_number)
 );
 
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
     id SERIAL PRIMARY KEY,
     order_number VARCHAR(100) NOT NULL UNIQUE,
     product_id INT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
@@ -37,15 +37,17 @@ CREATE TABLE orders (
     start_time TIMESTAMP NOT NULL,
     deadline TIMESTAMP NOT NULL,
     penalty_per_hour NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    weight INT NOT NULL DEFAULT 1,
     status VARCHAR(30) NOT NULL DEFAULT 'Новый',
     CONSTRAINT chk_order_priority CHECK (priority BETWEEN 1 AND 100),
     CONSTRAINT chk_order_quantity CHECK (quantity > 0),
     CONSTRAINT chk_order_penalty CHECK (penalty_per_hour >= 0.00),
+    CONSTRAINT chk_order_weight CHECK (weight BETWEEN 1 AND 5),
     CONSTRAINT chk_order_dates CHECK (deadline > start_time),
     CONSTRAINT chk_order_status CHECK (status IN ('Новый', 'Запланирован', 'В работе', 'Завершен', 'Просрочен'))
 );
 
-CREATE TABLE schedule (
+CREATE TABLE IF NOT EXISTS schedule (
     id SERIAL PRIMARY KEY,
     order_id INT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
     operation_id INT NOT NULL REFERENCES operations(id) ON DELETE CASCADE,

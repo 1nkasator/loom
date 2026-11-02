@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LOOM — Система оперативного планирования производства</title>
+    <!-- Подключение vis.js Timeline для интерактивной диаграммы Ганта -->
+    <link href="https://unpkg.com/vis-timeline@latest/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://unpkg.com/vis-timeline@latest/standalone/umd/vis-timeline-graph2d.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #121214;
+            --bg-card: #1a1a1e;
+            --bg-input: #232328;
+            --border-color: #33333d;
+            --accent-green: #2ecc71;
+            --accent-green-hover: #27ae60;
+            --accent-blue: #3498db;
+            --accent-red: #e74c3c;
+            --accent-orange: #f39c12;
+            --text-main: #f0f0f5;
+            --text-muted: #8c8c9e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background-color: var(--bg-card);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-badge {
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            color: #fff;
+            font-weight: 800;
+            font-size: 16px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            letter-spacing: 1px;
+        }
+
+        .app-title {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .app-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Навигация / Табы */
+        nav {
+            display: flex;
+            gap: 8px;
+            background-color: var(--bg-card);
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            padding: 14px 18px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background-color: rgba(255, 255, 255, 0.03);
+        }
+
+        .tab-btn.active {
+            color: var(--accent-green);
+            border-bottom-color: var(--accent-green);
+        }
+
+        main {
+            flex: 1;
+            padding: 24px;
+            max-width: 1500px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Карточки и сетка */
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Панель управления планированием */
+        .control-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: center;
+            background-color: var(--bg-input);
+            padding: 14px 18px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        select, input, button {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        select:focus, input:focus {
+            border-color: var(--accent-green);
+        }
+
+        .btn {
+            cursor: pointer;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background-color: var(--accent-green);
+            color: #fff;
+            border: none;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--accent-green-hover);
+        }
+
+        .btn-outline {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-outline:hover {
+            border-color: var(--text-main);
+        }
+
+        .btn-danger {
+            background-color: rgba(231, 76, 60, 0.2);
+            border: 1px solid var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        .btn-danger:hover {
+            background-color: var(--accent-red);
+            color: #fff;
+        }
+
+        /* KPI Метрики */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .kpi-card {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 16px;
+            border-left: 4px solid var(--accent-green);
+        }
+
+        .kpi-card.warning {
+            border-left-color: var(--accent-orange);
+        }
+
+        .kpi-card.danger {
+            border-left-color: var(--accent-red);
+        }
+
+        .kpi-card.blue {
+            border-left-color: var(--accent-blue);
+        }
+
+        .kpi-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .kpi-val {
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        /* Таблицы */
+        .table-responsive {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th {
+            background-color: var(--bg-input);
+            color: var(--text-muted);
+            text-align: left;
+            padding: 10px 14px;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr:hover td {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .badge-success {
+            background-color: rgba(46, 204, 113, 0.15);
+            color: var(--accent-green);
+            border: 1px solid var(--accent-green);
+        }
+
+        .badge-danger {
+            background-color: rgba(231, 76, 60, 0.15);
+            color: var(--accent-red);
+            border: 1px solid var(--accent-red);
+        }
+
+        .badge-info {
+            background-color: rgba(52, 152, 219, 0.15);
+            color: var(--accent-blue);
+            border: 1px solid var(--accent-blue);
+        }
+
+        /* Стилизация vis.js Timeline под темную тему */
+        #gantt-container {
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-input);
+            border-radius: 6px;
+            min-height: 420px;
+            margin-bottom: 24px;
+        }
+
+        .vis-timeline {
+            border: none;
+            background-color: var(--bg-input);
+            color: var(--text-main);
+        }
+
+        .vis-labelset .vis-label {
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            font-size: 12px;
+            padding: 8px;
+        }
+
+        .vis-time-axis .vis-text {
+            color: var(--text-muted);
+        }
+
+        .vis-item {
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .vis-item.item-ontime {
+            background-color: #27ae60;
+            border-color: #2ecc71;
+            color: #fff;
+        }
+
+        .vis-item.item-overdue {
+            background-color: #c0392b;
+            border-color: #e74c3c;
+            color: #fff;
+        }
+
+        /* Форма создания */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .banner-alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            display: none;
+        }
+
+        .banner-alert.success {
+            background-color: rgba(46, 204, 113, 0.15);
+            border: 1px solid var(--accent-green);
+            color: var(--accent-green);
+        }
+
+        .banner-alert.error {
+            background-color: rgba(231, 76, 60, 0.15);
+            border: 1px solid var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        /* Загрузка / Spinner */
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo-area">
+            <div class="logo-badge">LOOM</div>
+            <div>
+                <div class="app-title">Loom Production Scheduling APS</div>
+                <div class="app-subtitle">Интеллектуальное планирование и диспетчеризация производства</div>
+            </div>
+        </div>
+        <div>
+            <span class="badge badge-info">FastAPI + PostgreSQL + Vis.js</span>
+        </div>
+    </header>
+
+    <nav>
+        <button class="tab-btn active" onclick="switchTab('tab-schedule')">📊 Расписание и Гант</button>
+        <button class="tab-btn" onclick="switchTab('tab-orders')">📋 Заказы</button>
+        <button class="tab-btn" onclick="switchTab('tab-resources')">🛠️ Оборудование и персонал</button>
+        <button class="tab-btn" onclick="switchTab('tab-products')">⚙️ Номенклатура и техпроцессы</button>
+        <button class="tab-btn" onclick="switchTab('tab-benchmarks')">⚡ Сравнение правил (Бенчмарк)</button>
+    </nav>
+
+    <main>
+        <div id="alert-box" class="banner-alert"></div>
+
+        <!-- ==================== ВКЛАДКА 1: РАСПИСАНИЕ И ДИАГРАММА ГАНТА ==================== -->
+        <div id="tab-schedule" class="tab-content active">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Параметры планирования производства</div>
+                    <div>
+                        <button class="btn btn-outline" onclick="exportScheduleCSV()">📥 Скачать schedule.csv</button>
+                    </div>
+                </div>
+
+                <div class="control-bar">
+                    <div class="form-group">
+                        <label>Метод планирования</label>
+                        <select id="schedule-method">
+                            <option value="ANNEALING" selected>🔥 Имитация отжига (Simulated Annealing)</option>
+                            <option value="WSPT">⚖️ WSPT (Взвешенная длительность)</option>
+                            <option value="EDD">⏰ EDD (По ближайшему дедлайну)</option>
+                            <option value="SPT">⚡ SPT (Сначала короткие заказы)</option>
+                            <option value="FIFO">📥 FIFO (По порядку поступления)</option>
+                            <option value="LPT">⏳ LPT (Сначала длительные заказы)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="opt-params">
+                        <label>Лимит времени отжига (сек)</label>
+                        <input type="number" id="opt-time-limit" value="3.0" min="0.5" max="30" step="0.5" style="width: 120px;">
+                    </div>
+
+                    <div class="form-group" style="align-self: flex-end;">
+                        <button class="btn btn-primary" id="btn-run-schedule" onclick="runScheduling()">
+                            🚀 Построить расписание
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Блок показателей KPI -->
+                <div class="kpi-grid">
+                    <div class="kpi-card danger" id="kpi-penalty-card">
+                        <div class="kpi-label">Суммарный штраф за срыв сроков</div>
+                        <div class="kpi-val" id="kpi-penalty">0.00 ₽</div>
+                    </div>
+                    <div class="kpi-card warning">
+                        <div class="kpi-label">Просроченных заказов</div>
+                        <div class="kpi-val" id="kpi-overdue">0</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Максимальное опоздание</div>
+                        <div class="kpi-val" id="kpi-maxlat">0 ч</div>
+                    </div>
+                    <div class="kpi-card blue">
+                        <div class="kpi-label">Окончание цикла (Makespan)</div>
+                        <div class="kpi-val" id="kpi-makespan">—</div>
+                    </div>
+                </div>
+
+                <!-- Контейнер диаграммы Ганта на vis.js -->
+                <div class="card-title" style="margin-bottom: 10px;">Интерактивная диаграмма Ганта (Загрузка мощностей)</div>
+                <div id="gantt-container"></div>
+
+                <!-- Таблица элементов расписания -->
+                <div class="card-title" style="margin-bottom: 10px;">Детализированный производственный план</div>
+                <div class="table-responsive">
+                    <table id="schedule-table">
+                        <thead>
+                            <tr>
+                                <th>Заказ</th>
+                                <th>Шаг</th>
+                                <th>Операция</th>
+                                <th>Исполнитель</th>
+                                <th>Оборудование</th>
+                                <th>Время старта</th>
+                                <th>Время завершения</th>
+                                <th>Статус сдачи</th>
+                            </tr>
+                        </thead>
+                        <tbody id="schedule-table-body">
+                            <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Расписание еще не сформировано. Нажмите «Построить расписание».</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ВКЛАДКА 2: ЗАКАЗЫ ==================== -->
+        <div id="tab-orders" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Создание нового производственного заказа</div>
+                </div>
+                <form id="order-create-form" onsubmit="handleCreateOrder(event)">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Номер / Шифр заказа</label>
+                            <input type="text" id="ord-number" required placeholder="Например: ЗАК-2026-055">
+                        </div>
+                        <div class="form-group">
+                            <label>Изделие</label>
+                            <select id="ord-product" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Приоритет (1 - 100)</label>
+                            <input type="number" id="ord-priority" value="5" min="1" max="100" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Важность (Вес: 1 - 5)</label>
+                            <input type="number" id="ord-weight" value="2" min="1" max="5" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Штраф (руб./час)</label>
+                            <input type="number" id="ord-penalty" value="500" min="0" step="50" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Начать не ранее</label>
+                            <input type="datetime-local" id="ord-start" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Закончить не позднее (Дедлайн)</label>
+                            <input type="datetime-local" id="ord-deadline" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">➕ Добавить заказ</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Импорт заказов из CSV</div>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <input type="file" id="csv-order-file" accept=".csv" style="max-width: 400px;">
+                    <button class="btn btn-outline" onclick="uploadOrdersCSV()">📤 Загрузить CSV</button>
+                </div>
+                <div id="import-result" style="margin-top: 10px; font-size: 13px; color: var(--text-muted);"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Текущий пул производственных заказов</div>
+                    <button class="btn btn-outline" onclick="loadOrders()">🔄 Обновить</button>
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Номер заказа</th>
+                                <th>Изделие</th>
+                                <th>Приоритет</th>
+                                <th>Вес</th>
+                                <th>Штраф/ч</th>
+                                <th>Дата старта</th>
+                                <th>Дедлайн</th>
+                                <th>Статус</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ВКЛАДКА 3: РЕСУРСЫ ==================== -->
+        <div id="tab-resources" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Добавить производственный ресурс</div>
+                </div>
+                <form id="resource-create-form" onsubmit="handleCreateResource(event)">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Наименование / ФИО</label>
+                            <input type="text" id="res-name" required placeholder="Например: Иванов И.И. или Токарный станок 16К20">
+                        </div>
+                        <div class="form-group">
+                            <label>Категория</label>
+                            <select id="res-category" required>
+                                <option value="сотрудник">Сотрудник</option>
+                                <option value="станок">Станок</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Специализация / Тип</label>
+                            <input type="text" id="res-type" required placeholder="токарь, фрезерный станок, ЧПУ и т.д.">
+                        </div>
+                        <div class="form-group">
+                            <label>Приоритет назначения (1 - 100)</label>
+                            <input type="number" id="res-priority" value="1" min="1" max="100" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">➕ Добавить ресурс</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Штатное расписание и станочный парк</div>
+                    <button class="btn btn-outline" onclick="loadResources()">🔄 Обновить</button>
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Наименование ресурса</th>
+                                <th>Категория</th>
+                                <th>Специализация / Тип</th>
+                                <th>Приоритет</th>
+                                <th>Статус</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resources-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ВКЛАДКА 4: НОМЕНКЛАТУРА ==================== -->
+        <div id="tab-products" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Номенклатурный справочник изделий и маршрутные карты</div>
+                </div>
+                <div id="products-catalog-container"></div>
+            </div>
+        </div>
+
+        <!-- ==================== ВКЛАДКА 5: БЕНЧМАРК ==================== -->
+        <div id="tab-benchmarks" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Сравнительный анализ эвристик и алгоритма оптимизации</div>
+                </div>
+                <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+                    В соответствии с заданием №2 и №3, ниже представлены результаты работы 5 конструктивных правил приоритета на сгенерированных наборах данных разного масштаба при высокой загрузке оборудования.
+                </p>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Правило / Алгоритм</th>
+                                <th>Набор данных</th>
+                                <th>Суммарный штраф (руб.)</th>
+                                <th>Сорвано заказов</th>
+                                <th>Макс. опоздание (ч)</th>
+                                <th>Дата окончания</th>
+                                <th>Время расчета</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bench-table-body">
+                            <!-- Данные будут подгружены -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // Инициализация дат по умолчанию в форме создания заказа
+        document.addEventListener("DOMContentLoaded", () => {
+            const now = new Date();
+            const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
+            
+            // Формат YYYY-MM-DDTHH:MM
+            const formatForInput = (d) => {
+                const pad = (n) => n < 10 ? '0' + n : n;
+                return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`;
+            };
+
+            document.getElementById("ord-start").value = "2026-10-01T08:00";
+            document.getElementById("ord-deadline").value = "2026-10-02T16:00";
+
+            loadProducts();
+            loadOrders();
+            loadResources();
+            loadTimelineAndSchedule();
+            loadBenchmarkTable();
+        });
+
+        function switchTab(tabId) {
+            document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+            document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+
+            event.currentTarget.classList.add("active");
+            document.getElementById(tabId).classList.add("active");
+
+            if (tabId === "tab-schedule" && timeline) {
+                setTimeout(() => timeline.redraw(), 100);
+            }
+        }
+
+        function showAlert(msg, isError = false) {
+            const box = document.getElementById("alert-box");
+            box.textContent = msg;
+            box.className = `banner-alert ${isError ? 'error' : 'success'}`;
+            box.style.display = "block";
+            setTimeout(() => { box.style.display = "none"; }, 5000);
+        }
+
+        // ==================== VIS.JS TIMELINE ====================
+        let timeline = null;
+
+        async function loadTimelineAndSchedule() {
+            try {
+                const res = await fetch("/api/schedule/timeline");
+                if (!res.ok) {
+                    document.getElementById("schedule-table-body").innerHTML = 
+                        `<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Расписание еще не построено. Выберите метод и нажмите «Построить расписание».</td></tr>`;
+                    return;
+                }
+                const data = await res.json();
+
+                // Отрисовка vis.js Timeline
+                const container = document.getElementById("gantt-container");
+                const groups = new vis.DataSet(data.groups);
+                const items = new vis.DataSet(data.items);
+
+                const options = {
+                    orientation: 'top',
+                    stack: false,
+                    selectable: true,
+                    multiselect: false,
+                    zoomMin: 1000 * 60 * 60 * 2, // 2 часа минимум
+                    zoomMax: 1000 * 60 * 60 * 24 * 31, // месяц максимум
+                    format: {
+                        minorLabels: {
+                            minute: 'HH:mm',
+                            hour: 'HH:mm',
+                            day: 'D MMM (ddd)'
+                        }
+                    }
+                };
+
+                if (timeline) {
+                    timeline.destroy();
+                }
+                timeline = new vis.Timeline(container, items, groups, options);
+
+                // Загружаем данные в таблицу расписания
+                loadScheduleTable();
+            } catch (err) {
+                console.warn("Timeline data:", err);
+            }
+        }
+
+        async function loadScheduleTable() {
+            try {
+                const res = await fetch("/api/schedule");
+                if (!res.ok) return;
+                const items = await res.json();
+
+                const tbody = document.getElementById("schedule-table-body");
+                tbody.innerHTML = "";
+
+                let totalPen = 0;
+                let overdueCount = 0;
+                let maxLat = 0;
+
+                items.forEach(it => {
+                    const st = new Date(it.start_time);
+                    const et = new Date(it.end_time);
+                    const dl = new Date(it.deadline);
+                    const isOverdue = et > dl;
+
+                    if (isOverdue) {
+                        overdueCount++;
+                        const latH = (et - dl) / (1000 * 3600);
+                        if (latH > maxLat) maxLat = latH;
+                    }
+
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `
+                        <td><b>${it.order_number}</b></td>
+                        <td>${it.step_number}</td>
+                        <td>${it.operation_name}</td>
+                        <td>${it.employee_name}</td>
+                        <td>${it.machine_name}</td>
+                        <td>${st.toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}</td>
+                        <td>${et.toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}</td>
+                        <td><span class="badge ${isOverdue ? 'badge-danger' : 'badge-success'}">${isOverdue ? '⚠️ Просрочен' : '✅ В срок'}</span></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                if (items.length > 0) {
+                    const lastEt = new Date(items[items.length - 1].end_time);
+                    document.getElementById("kpi-makespan").textContent = lastEt.toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // ==================== ЗАПУСК ПЛАНИРОВАНИЯ ====================
+        async function runScheduling() {
+            const method = document.getElementById("schedule-method").value;
+            const timeLimit = parseFloat(document.getElementById("opt-time-limit").value) || 3.0;
+            const btn = document.getElementById("btn-run-schedule");
+            
+            btn.innerHTML = `<span class="spinner"></span> Расчет...`;
+            btn.disabled = true;
+
+            try {
+                const res = await fetch("/api/schedule/run", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        rule: method,
+                        time_limit: timeLimit,
+                        max_iterations: 2000
+                    })
+                });
+
+                const data = await res.json();
+                if (!res.ok) {
+                    showAlert(data.detail || "Ошибка построения расписания", true);
+                    return;
+                }
+
+                showAlert(`Расписание успешно построено! Метод: ${data.method}`);
+                
+                // Обновляем KPI
+                const m = data.metrics || {};
+                document.getElementById("kpi-penalty").textContent = `${Number(m.penalty || 0).toLocaleString('ru-RU', {minimumFractionDigits: 2})} ₽`;
+                document.getElementById("kpi-overdue").textContent = m.overdue_count || 0;
+                document.getElementById("kpi-maxlat").textContent = `${m.max_lateness || 0} ч`;
+                document.getElementById("kpi-makespan").textContent = m.makespan || "—";
+
+                // Перерисовываем диаграмму и таблицу
+                await loadTimelineAndSchedule();
+            } catch (err) {
+                showAlert(`Сетевая ошибка: ${err.message}`, true);
+            } finally {
+                btn.innerHTML = `🚀 Построить расписание`;
+                btn.disabled = false;
+            }
+        }
+
+        function exportScheduleCSV() {
+            window.location.href = "/api/schedule/export";
+        }
+
+        // ==================== ЗАКАЗЫ ====================
+        async function loadOrders() {
+            try {
+                const res = await fetch("/api/orders");
+                const orders = await res.json();
+                const tbody = document.getElementById("orders-table-body");
+                tbody.innerHTML = "";
+
+                orders.forEach(o => {
+                    const st = new Date(o.start_time);
+                    const dl = new Date(o.deadline);
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `
+                        <td>${o.id}</td>
+                        <td><b>${o.order_number}</b></td>
+                        <td>${o.product_name || o.product_id}</td>
+                        <td>${o.priority}</td>
+                        <td>${o.weight || 1}</td>
+                        <td>${Number(o.penalty_per_hour).toFixed(2)} ₽</td>
+                        <td>${st.toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}</td>
+                        <td>${dl.toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}</td>
+                        <td><span class="badge badge-info">${o.status}</span></td>
+                        <td>
+                            <button class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" onclick="deleteOrder(${o.id})">Удалить</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function handleCreateOrder(e) {
+            e.preventDefault();
+            const body = {
+                order_number: document.getElementById("ord-number").value.trim(),
+                product_id: parseInt(document.getElementById("ord-product").value),
+                priority: parseInt(document.getElementById("ord-priority").value),
+                weight: parseInt(document.getElementById("ord-weight").value),
+                penalty_per_hour: parseFloat(document.getElementById("ord-penalty").value),
+                start_time: document.getElementById("ord-start").value + ":00",
+                deadline: document.getElementById("ord-deadline").value + ":00",
+                quantity: 1
+            };
+
+            try {
+                const res = await fetch("/api/orders", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showAlert(data.detail || "Ошибка создания заказа", true);
+                    return;
+                }
+                showAlert(`Заказ ${data.order_number} успешно добавлен!`);
+                document.getElementById("ord-number").value = "";
+                loadOrders();
+            } catch (err) {
+                showAlert(`Сетевая ошибка: ${err.message}`, true);
+            }
+        }
+
+        async function deleteOrder(id) {
+            if (!confirm(`Вы действительно хотите удалить заказ #${id}?`)) return;
+            try {
+                const res = await fetch(`/api/orders/${id}`, { method: "DELETE" });
+                if (res.ok) {
+                    showAlert(`Заказ #${id} удален`);
+                    loadOrders();
+                } else {
+                    showAlert("Не удалось удалить заказ", true);
+                }
+            } catch (err) {
+                showAlert(err.message, true);
+            }
+        }
+
+        async function uploadOrdersCSV() {
+            const fileInput = document.getElementById("csv-order-file");
+            if (!fileInput.files.length) {
+                alert("Пожалуйста, выберите CSV-файл");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            const resDiv = document.getElementById("import-result");
+            resDiv.textContent = "Загрузка и обработка файла...";
+
+            try {
+                const res = await fetch("/api/orders/import", {
+                    method: "POST",
+                    body: formData
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    resDiv.innerHTML = `<span style="color: var(--accent-green)">Загружено успешно: ${data.accepted} строк. Отклонено: ${data.rejected}.</span>`;
+                    loadOrders();
+                } else {
+                    resDiv.innerHTML = `<span style="color: var(--accent-red)">Ошибка импорта: ${data.detail}</span>`;
+                }
+            } catch (err) {
+                resDiv.innerHTML = `<span style="color: var(--accent-red)">Сетевая ошибка: ${err.message}</span>`;
+            }
+        }
+
+        // ==================== РЕСУРСЫ ====================
+        async function loadResources() {
+            try {
+                const res = await fetch("/api/resources");
+                const list = await res.json();
+                const tbody = document.getElementById("resources-table-body");
+                tbody.innerHTML = "";
+
+                list.forEach(r => {
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `
+                        <td>${r.id}</td>
+                        <td><b>${r.name}</b></td>
+                        <td><span class="badge ${r.category === 'станок' ? 'badge-info' : 'badge-success'}">${r.category}</span></td>
+                        <td>${r.type}</td>
+                        <td>${r.priority}</td>
+                        <td>${r.is_active ? 'Активен' : 'Отключен'}</td>
+                        <td>
+                            <button class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" onclick="deleteResource(${r.id})">Удалить</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function handleCreateResource(e) {
+            e.preventDefault();
+            const body = {
+                name: document.getElementById("res-name").value.trim(),
+                category: document.getElementById("res-category").value,
+                type: document.getElementById("res-type").value.trim(),
+                priority: parseInt(document.getElementById("res-priority").value)
+            };
+
+            try {
+                const res = await fetch("/api/resources", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+                if (res.ok) {
+                    showAlert("Ресурс успешно добавлен!");
+                    document.getElementById("res-name").value = "";
+                    document.getElementById("res-type").value = "";
+                    loadResources();
+                } else {
+                    const err = await res.json();
+                    showAlert(err.detail || "Ошибка добавления", true);
+                }
+            } catch (err) {
+                showAlert(err.message, true);
+            }
+        }
+
+        async function deleteResource(id) {
+            if (!confirm(`Удалить ресурс #${id}?`)) return;
+            try {
+                const res = await fetch(`/api/resources/${id}`, { method: "DELETE" });
+                if (res.ok) {
+                    showAlert(`Ресурс #${id} удален`);
+                    loadResources();
+                } else {
+                    showAlert("Ошибка при удалении ресурса", true);
+                }
+            } catch (err) {
+                showAlert(err.message, true);
+            }
+        }
+
+        // ==================== ПРОДУКТЫ И ОПЕРАЦИИ ====================
+        async function loadProducts() {
+            try {
+                const res = await fetch("/api/products");
+                const prods = await res.json();
+
+                // Заполняем select в форме заказов
+                const select = document.getElementById("ord-product");
+                select.innerHTML = "";
+                prods.forEach(p => {
+                    const opt = document.createElement("option");
+                    opt.value = p.id;
+                    opt.textContent = `${p.id}. ${p.name}`;
+                    select.appendChild(opt);
+                });
+
+                // Заполняем каталог с операциями
+                const container = document.getElementById("products-catalog-container");
+                container.innerHTML = "";
+
+                for (const p of prods) {
+                    const opsRes = await fetch(`/api/products/${p.id}/operations`);
+                    const ops = await opsRes.json();
+
+                    let opsHtml = ops.map(o => `
+                        <tr>
+                            <td>Шаг ${o.step_number}</td>
+                            <td><b>${o.name}</b></td>
+                            <td>⏱️ ${o.duration} ч.</td>
+                            <td>👤 ${o.required_emp_type}</td>
+                            <td>🛠️ ${o.required_mach_type || 'Вручную'}</td>
+                        </tr>
+                    `).join("");
+
+                    const div = document.createElement("div");
+                    div.style.marginBottom = "20px";
+                    div.innerHTML = `
+                        <h3 style="color: var(--accent-green); margin-bottom: 6px;">${p.name} <span style="font-size: 12px; color: var(--text-muted); font-weight: normal;">${p.description || ''}</span></h3>
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Шаг</th>
+                                        <th>Операция</th>
+                                        <th>Длительность</th>
+                                        <th>Требуемый сотрудник</th>
+                                        <th>Требуемый станок</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${opsHtml}</tbody>
+                            </table>
+                        </div>
+                    `;
+                    container.appendChild(div);
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // ==================== БЕНЧМАРК ТАБЛИЦА ====================
+        function loadBenchmarkTable() {
+            const tbody = document.getElementById("bench-table-body");
+            const data = [
+                { r: "FIFO", d: "Малый (10)", pen: "55,000.00 ₽", over: 2, lat: "26.0 ч", mk: "05.10 14:00", t: "0.69 мс" },
+                { r: "EDD",  d: "Малый (10)", pen: "7,700.00 ₽",  over: 3, lat: "2.0 ч",  mk: "05.10 14:00", t: "0.67 мс" },
+                { r: "SPT",  d: "Малый (10)", pen: "7,700.00 ₽",  over: 3, lat: "2.0 ч",  mk: "05.10 14:00", t: "0.64 мс" },
+                { r: "LPT",  d: "Малый (10)", pen: "7,700.00 ₽",  over: 3, lat: "2.0 ч",  mk: "05.10 14:00", t: "0.62 мс" },
+                { r: "WSPT", d: "Малый (10)", pen: "7,700.00 ₽",  over: 3, lat: "2.0 ч",  mk: "05.10 14:00", t: "0.61 мс" },
+                { r: "FIFO", d: "Средний (25)", pen: "24,000.00 ₽", over: 2, lat: "50.0 ч", mk: "09.10 14:00", t: "1.99 мс" },
+                { r: "EDD",  d: "Средний (25)", pen: "27,600.00 ₽", over: 3, lat: "26.0 ч", mk: "09.10 14:00", t: "2.08 мс" },
+                { r: "SPT",  d: "Средний (25)", pen: "15,200.00 ₽", over: 3, lat: "26.0 ч", mk: "09.10 14:00", t: "2.01 мс" },
+                { r: "LPT",  d: "Средний (25)", pen: "15,200.00 ₽", over: 3, lat: "26.0 ч", mk: "09.10 14:00", t: "2.06 мс" },
+                { r: "WSPT", d: "Средний (25)", pen: "293,600.00 ₽", over: 7, lat: "91.0 ч", mk: "09.10 14:00", t: "2.33 мс" },
+                { r: "FIFO", d: "Большой (50)", pen: "506,350.00 ₽", over: 17, lat: "74.0 ч", mk: "18.10 14:00", t: "4.62 мс" },
+                { r: "EDD",  d: "Большой (50)", pen: "508,600.00 ₽", over: 14, lat: "50.0 ч", mk: "18.10 14:00", t: "4.70 мс" },
+                { r: "SPT",  d: "Большой (50)", pen: "542,600.00 ₽", over: 14, lat: "50.0 ч", mk: "18.10 14:00", t: "4.56 мс" },
+                { r: "LPT",  d: "Большой (50)", pen: "542,600.00 ₽", over: 14, lat: "50.0 ч", mk: "18.10 14:00", t: "5.13 мс" },
+                { r: "WSPT", d: "Большой (50)", pen: "660,300.00 ₽", over: 12, lat: "170.0 ч", mk: "18.10 14:00", t: "4.76 мс" },
+            ];
+
+            tbody.innerHTML = data.map(row => `
+                <tr>
+                    <td><b>${row.r}</b></td>
+                    <td>${row.d}</td>
+                    <td style="color: var(--accent-orange); font-weight: 700;">${row.pen}</td>
+                    <td>${row.over}</td>
+                    <td>${row.lat}</td>
+                    <td>${row.mk}</td>
+                    <td>${row.t}</td>
+                </tr>
+            `).join("");
+        }
+    </script>
+</body>
+</html>
